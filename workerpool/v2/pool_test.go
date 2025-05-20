@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -54,7 +55,30 @@ func TestPoolSubmitNoTasks(t *testing.T) {
 	pool.StopAndWait()
 }
 
-func TestTaskGroup(t *testing.T) {
+func TestPoolContextSkipTasks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	pool := NewPool(5, 10, WithPoolContext(ctx))
+
+	taskCount := 100
+	var executedCount atomic.Int64
+
+	for i := 0; i < taskCount; i++ {
+		pool.Submit(func() {
+			time.Sleep(10 * time.Millisecond)
+			executedCount.Add(1)
+		})
+	}
+
+	pool.StopAndWait()
+
+	if executed := executedCount.Load(); executed >= int64(taskCount) {
+		t.Errorf("expected fewer than %d tasks to run due to context cancel, got %d", taskCount, executed)
+	}
+}
+
+func TestGroupSubmit(t *testing.T) {
 	pool := NewPool(100, 200)
 	group := pool.NewGroup()
 
@@ -72,4 +96,56 @@ func TestTaskGroup(t *testing.T) {
 	pool.StopAndWait()
 
 	assert.Equal(t, int64(taskCount), executedCount.Load())
+}
+
+func TestGroupContextSkipTasks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	pool := NewPool(5, 10)
+	group := pool.NewGroupCtx(ctx)
+
+	taskCount := 100
+	var executedCount atomic.Int64
+
+	for i := 0; i < taskCount; i++ {
+		group.Submit(func() {
+			time.Sleep(10 * time.Millisecond)
+			executedCount.Add(1)
+		})
+	}
+
+	group.Wait()
+	pool.StopAndWait()
+
+	if executed := executedCount.Load(); executed >= int64(taskCount) {
+		t.Errorf("expected fewer than %d tasks to run due to context cancel, got %d", taskCount, executed)
+	}
+}
+
+func TestGroupParentContextSkipTasks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	groupCtx := context.Background()
+
+	pool := NewPool(5, 10, WithPoolContext(ctx))
+	group := pool.NewGroupCtx(groupCtx)
+
+	taskCount := 100
+	var executedCount atomic.Int64
+
+	for i := 0; i < taskCount; i++ {
+		group.Submit(func() {
+			time.Sleep(10 * time.Millisecond)
+			executedCount.Add(1)
+		})
+	}
+
+	group.Wait()
+	pool.StopAndWait()
+
+	if executed := executedCount.Load(); executed >= int64(taskCount) {
+		t.Errorf("expected fewer than %d tasks to run due to context cancel, got %d", taskCount, executed)
+	}
 }
