@@ -78,6 +78,34 @@ func TestPoolContextSkipTasks(t *testing.T) {
 	}
 }
 
+func TestPoolSubmitContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	pool := NewPool(1, 5, WithPoolContext(ctx))
+
+	var taskDoneCount, taskStartCount int32
+
+	// Submit a long-running, cancellable task
+	pool.Submit(func() {
+		atomic.AddInt32(&taskStartCount, 1)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(1 * time.Minute):
+			atomic.AddInt32(&taskDoneCount, 1)
+			return
+		}
+	})
+
+	// Cancel the context
+	cancel()
+
+	pool.StopAndWait()
+
+	assert.Equal(t, int32(0), atomic.LoadInt32(&taskStartCount))
+	assert.Equal(t, int32(0), atomic.LoadInt32(&taskDoneCount))
+}
+
 func TestGroupSubmit(t *testing.T) {
 	pool := NewPool(100, 200)
 	group := pool.NewGroup()
@@ -123,14 +151,12 @@ func TestGroupContextSkipTasks(t *testing.T) {
 	}
 }
 
-func TestGroupParentContextSkipTasks(t *testing.T) {
+func TestGroupParentContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	groupCtx := context.Background()
-
 	pool := NewPool(5, 10, WithPoolContext(ctx))
-	group := pool.NewGroupCtx(groupCtx)
+	group := pool.NewGroupCtx(context.Background())
 
 	taskCount := 100
 	var executedCount atomic.Int64
