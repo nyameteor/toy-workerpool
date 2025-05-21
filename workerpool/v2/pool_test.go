@@ -102,7 +102,7 @@ func TestPoolContextSkipTasks(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
-	pool := NewPool(5, 10, WithPoolContext(ctx))
+	pool := NewPool(5, 10, WithContext(ctx))
 
 	taskCount := 100
 	var executedCount atomic.Int64
@@ -124,7 +124,7 @@ func TestPoolContextSkipTasks(t *testing.T) {
 func TestPoolSubmitContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	pool := NewPool(1, 5, WithPoolContext(ctx))
+	pool := NewPool(1, 5, WithContext(ctx))
 
 	var taskDoneCount, taskStartCount int32
 
@@ -174,7 +174,7 @@ func TestGroupContextSkipTasks(t *testing.T) {
 	defer cancel()
 
 	pool := NewPool(5, 10)
-	group := pool.NewGroupCtx(ctx)
+	group := pool.NewGroupContext(ctx)
 
 	taskCount := 100
 	var executedCount atomic.Int64
@@ -198,8 +198,8 @@ func TestGroupParentContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	pool := NewPool(5, 10, WithPoolContext(ctx))
-	group := pool.NewGroupCtx(context.Background())
+	pool := NewPool(5, 10, WithContext(ctx))
+	group := pool.NewGroupContext(context.Background())
 
 	taskCount := 100
 	var executedCount atomic.Int64

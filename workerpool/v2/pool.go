@@ -26,7 +26,7 @@ type Pool struct {
 
 // NewPool creates a new Pool with the given number of workers and task queue capacity.
 // If no context is set, context.Background() is used.
-func NewPool(maxWorkers, queueCapacity int, options ...PoolOption) *Pool {
+func NewPool(maxWorkers, queueCapacity int, options ...Option) *Pool {
 	p := &Pool{
 		tasks:         make(chan func(), queueCapacity),
 		maxWorkers:    maxWorkers,
@@ -115,10 +115,10 @@ func (p *Pool) runTask(task func()) {
 	task()
 }
 
-type PoolOption func(*Pool)
+type Option func(*Pool)
 
-// WithPoolContext sets a context for the pool.
-func WithPoolContext(ctx context.Context) PoolOption {
+// WithContext sets a context for the pool.
+func WithContext(ctx context.Context) Option {
 	return func(p *Pool) {
 		p.ctx = ctx
 	}
@@ -126,11 +126,11 @@ func WithPoolContext(ctx context.Context) PoolOption {
 
 // NewGroup creates a new TaskGroup with context.Background().
 func (p *Pool) NewGroup() *TaskGroup {
-	return p.NewGroupCtx(context.Background())
+	return p.NewGroupContext(context.Background())
 }
 
-// NewGroupCtx creates a new TaskGroup with the given context.
-func (p *Pool) NewGroupCtx(ctx context.Context) *TaskGroup {
+// NewGroupContext creates a new TaskGroup with the given context.
+func (p *Pool) NewGroupContext(ctx context.Context) *TaskGroup {
 	return &TaskGroup{
 		pool: p,
 		ctx:  ctx,
