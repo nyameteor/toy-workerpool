@@ -2,7 +2,15 @@ package v2
 
 import (
 	"context"
+	"errors"
+	"log"
+	"runtime/debug"
 	"sync"
+	"sync/atomic"
+)
+
+var (
+	ErrPoolStopped = errors.New("worker pool is stopped and no longer accepts tasks")
 )
 
 // Pool manages a set of worker goroutines to run submitted tasks.
@@ -12,6 +20,7 @@ type Pool struct {
 	queueCapacity int
 	wg            sync.WaitGroup
 	stopOnce      sync.Once
+	stopped       int32
 	ctx           context.Context
 }
 
@@ -43,6 +52,10 @@ func (p *Pool) Submit(task func()) {
 		return
 	}
 
+	if p.Stopped() {
+		panic(ErrPoolStopped)
+	}
+
 	p.wg.Add(1)
 	p.tasks <- func() {
 		defer p.wg.Done()
@@ -59,9 +72,16 @@ func (p *Pool) Submit(task func()) {
 
 // Stop closes the task queue. No new tasks can be submitted after this.
 func (p *Pool) Stop() {
+	atomic.StoreInt32(&p.stopped, 1)
+
 	p.stopOnce.Do(func() {
 		close(p.tasks)
 	})
+}
+
+// Stopped reports if the pool is closed and no longer accepts tasks.
+func (p *Pool) Stopped() bool {
+	return atomic.LoadInt32(&p.stopped) == 1
 }
 
 // Wait blocks until all submitted tasks are finished.
@@ -80,10 +100,19 @@ func (p *Pool) startWorkers() {
 	for i := 0; i < p.maxWorkers; i++ {
 		go func() {
 			for task := range p.tasks {
-				task()
+				p.runTask(task)
 			}
 		}()
 	}
+}
+
+func (p *Pool) runTask(task func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Worker panic recovered: %v\nStack Trace: %s\n", r, debug.Stack())
+		}
+	}()
+	task()
 }
 
 type PoolOption func(*Pool)
@@ -120,6 +149,10 @@ type TaskGroup struct {
 func (g *TaskGroup) Submit(task func()) {
 	if task == nil {
 		return
+	}
+
+	if g.pool.Stopped() {
+		panic(ErrPoolStopped)
 	}
 
 	g.wg.Add(1)
