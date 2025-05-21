@@ -39,33 +39,21 @@ func NewPool(maxWorkers, queueCapacity int, options ...PoolOption) *Pool {
 // Submit adds a task to the pool. Blocks if the queue is full.
 // Skips if the pool context is done, or if the task is nil.
 func (p *Pool) Submit(task func()) {
-	p.trySubmit(task)
-}
-
-func (p *Pool) trySubmit(task func()) (submitted bool) {
 	if task == nil {
 		return
 	}
 
-	if err := p.ctx.Err(); err != nil {
-		return
-	}
-
-	wrappedTask := func() {
+	p.wg.Add(1)
+	p.tasks <- func() {
 		defer p.wg.Done()
-		if p.ctx.Err() != nil {
-			return
-		}
-		task()
-	}
 
-	select {
-	case p.tasks <- wrappedTask:
-		p.wg.Add(1) // Add after successful enqueue
-		submitted = true
-		return
-	case <-p.ctx.Done():
-		return
+		select {
+		case <-p.ctx.Done():
+			return
+		default:
+		}
+
+		task()
 	}
 }
 
@@ -130,25 +118,25 @@ type TaskGroup struct {
 // Submit adds a task to the group and schedules it in the pool.
 // Skips if the group or pool context is done, or if the task is nil.
 func (g *TaskGroup) Submit(task func()) {
-	if g.ctx.Err() != nil || g.pool.ctx.Err() != nil {
+	if task == nil {
 		return
 	}
 
-	wrappedTask := func() {
+	g.wg.Add(1)
+	g.pool.wg.Add(1)
+	g.pool.tasks <- func() {
+		defer g.pool.wg.Done()
 		defer g.wg.Done()
-		if g.ctx.Err() != nil || g.pool.ctx.Err() != nil {
-			return
-		}
-		task()
-	}
 
-	select {
-	case g.pool.tasks <- wrappedTask:
-		g.wg.Add(1)
-	case <-g.ctx.Done():
-		return
-	case <-g.pool.ctx.Done():
-		return
+		select {
+		case <-g.ctx.Done():
+			return
+		case <-g.pool.ctx.Done():
+			return
+		default:
+		}
+
+		task()
 	}
 }
 
