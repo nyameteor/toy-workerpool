@@ -13,13 +13,22 @@ A Golang project to learn and practice concurrency.
 
 ### v2: Context-Aware Support
 
-- [x] Context support at both the pool and `TaskGroup` levels.
-- [x] Skips task submission if the context is already canceled.
+- [x] Context support at both the `Pool` and `TaskGroup` levels.
+- [x] Task skipping when the context is already canceled.
+- [x] Panic recovery and stopped pool check.
 
 ### v3: Future Support
 
 - [ ] `Submit` API supports returning **futures**.
 - [ ] `Future` can be resolved to a result and an error.
+
+## Tests
+
+Run all unit tests with race detection:
+
+```sh
+go test -race ./...
+```
 
 ## References
 
