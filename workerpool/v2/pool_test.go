@@ -3,6 +3,7 @@ package v2
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -96,6 +97,33 @@ func TestSubmitOnStoppedPool(t *testing.T) {
 	}()
 
 	assert.Equal(t, ErrPoolStopped, err)
+}
+
+func TestPoolWithCustomPanicHandler(t *testing.T) {
+	var (
+		mu            sync.Mutex
+		capturedPanic any = nil
+	)
+
+	panicHandler := func(r any) {
+		mu.Lock()
+		defer mu.Unlock()
+		capturedPanic = r
+	}
+
+	pool := NewPool(1, 5, WithPanicHandler(panicHandler))
+
+	// Submit a task that panics
+	pool.Submit(func() {
+		panic("panic now!")
+	})
+
+	pool.StopAndWait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	// Panic should have been captured
+	assert.Equal(t, "panic now!", capturedPanic)
 }
 
 func TestPoolContextSkipTasks(t *testing.T) {

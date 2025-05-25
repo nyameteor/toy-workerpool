@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"runtime/debug"
 	"sync"
 	"sync/atomic"
 )
@@ -12,6 +11,10 @@ import (
 var (
 	ErrPoolStopped = errors.New("worker pool is stopped and no longer accepts tasks")
 )
+
+func defaultPanicHandler(r any) {
+	log.Printf("Worker panic recovered: %v\n", r)
+}
 
 // Pool manages a set of worker goroutines to run submitted tasks.
 type Pool struct {
@@ -22,6 +25,7 @@ type Pool struct {
 	stopOnce      sync.Once
 	stopped       int32
 	ctx           context.Context
+	panicHandler  func(r any)
 }
 
 // NewPool creates a new Pool with the given number of workers and task queue capacity.
@@ -31,6 +35,7 @@ func NewPool(maxWorkers, queueCapacity int, options ...Option) *Pool {
 		tasks:         make(chan func(), queueCapacity),
 		maxWorkers:    maxWorkers,
 		queueCapacity: queueCapacity,
+		panicHandler:  defaultPanicHandler,
 	}
 
 	for _, opt := range options {
@@ -109,7 +114,7 @@ func (p *Pool) startWorkers() {
 func (p *Pool) runTask(task func()) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Worker panic recovered: %v\nStack Trace: %s\n", r, debug.Stack())
+			p.panicHandler(r)
 		}
 	}()
 	task()
@@ -121,6 +126,13 @@ type Option func(*Pool)
 func WithContext(ctx context.Context) Option {
 	return func(p *Pool) {
 		p.ctx = ctx
+	}
+}
+
+// WithPanicHandler sets a panic handler for the pool.
+func WithPanicHandler(panicHandler func(r any)) Option {
+	return func(p *Pool) {
+		p.panicHandler = panicHandler
 	}
 }
 
