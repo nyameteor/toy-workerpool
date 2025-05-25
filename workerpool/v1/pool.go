@@ -58,11 +58,13 @@ func (p *Pool) StopAndWait() {
 // startWorkers launches the worker goroutines.
 func (p *Pool) startWorkers() {
 	for i := 0; i < p.maxWorkers; i++ {
-		go func() {
-			for task := range p.tasks {
-				task()
-			}
-		}()
+		go worker(p.tasks)
+	}
+}
+
+func worker(tasks chan func()) {
+	for task := range tasks {
+		task()
 	}
 }
 

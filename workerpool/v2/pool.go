@@ -103,21 +103,21 @@ func (p *Pool) StopAndWait() {
 // startWorkers launches the worker goroutines.
 func (p *Pool) startWorkers() {
 	for i := 0; i < p.maxWorkers; i++ {
-		go func() {
-			for task := range p.tasks {
-				p.runTask(task)
-			}
-		}()
+		go worker(p.tasks, p.panicHandler)
 	}
 }
 
-func (p *Pool) runTask(task func()) {
-	defer func() {
-		if r := recover(); r != nil {
-			p.panicHandler(r)
-		}
-	}()
-	task()
+func worker(tasks chan func(), panicHandler func(r any)) {
+	for task := range tasks {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					panicHandler(r)
+				}
+			}()
+			task()
+		}()
+	}
 }
 
 type Option func(*Pool)
