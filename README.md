@@ -16,11 +16,17 @@ A Golang project to learn and practice concurrency.
 
 #### Task Dispatching
 
-- **Centralized Queue (Pull Model)**: Workers pull tasks from a shared queue.
+- **Centralized Queue (Pull Model)**:
+
+  Workers pull tasks from a shared queue.
+
   - Pros: Simple, fair, easy to scale.
   - Cons: Queue contention under heavy load.
 
-- **Dedicated Queues (Push Model)**: Dispatcher pushes tasks to each worker’s own queue; can support work-stealing.
+- **Dedicated Queues (Push Model)**:
+
+  Dispatcher pushes tasks to each worker's own queue; can support work-stealing.
+
   - Pros: Reduces contention, improves throughput and cache locality.
   - Cons: More complex implementation.
 
@@ -34,7 +40,9 @@ A Golang project to learn and practice concurrency.
   - Pros: Adapts to workload, better resource efficiency.
   - Cons: More complexity managing worker creation and shutdown.
 
-- **Idle Timeout**: Removes workers after being idle for some duration to conserve resources.
+- **Idle Timeout**:
+
+  Removes workers after being idle for some duration to conserve resources.
 
 #### Worker Resize Strategies
 
