@@ -1,0 +1,363 @@
+package v3
+
+import (
+	"context"
+	"errors"
+	"log"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+const (
+	defaultMinWorkers  = 0
+	defaultIdleTimeout = 5 * time.Second
+)
+
+var (
+	ErrPoolStopped = errors.New("worker pool is stopped and no longer accepts tasks")
+)
+
+func defaultPanicHandler(r any) {
+	log.Printf("Worker panic recovered: %v\n", r)
+}
+
+// Pool manages a set of worker goroutines to run submitted tasks.
+type Pool struct {
+	// Atomic counters, placed first for proper alignment
+	workerCount     int32
+	idleWorkerCount int32
+
+	// Configuration options
+	minWorkers    int
+	maxWorkers    int
+	queueCapacity int
+	ctx           context.Context
+	ctxCancel     context.CancelFunc
+	idleTimeout   time.Duration
+	panicHandler  func(r any)
+
+	// Internal state
+	taskQueue  chan func()
+	mutex      sync.Mutex
+	tasksWg    sync.WaitGroup
+	workersWg  sync.WaitGroup
+	purgerWg   sync.WaitGroup
+	stopOnce   sync.Once
+	stopSignal chan struct{}
+	stopped    int32
+}
+
+// NewPool creates a new Pool with the given number of workers and task queue capacity.
+// If no context is set, context.Background() is used.
+func NewPool(maxWorkers, queueCapacity int, options ...Option) *Pool {
+	p := &Pool{
+		minWorkers:    defaultMinWorkers,
+		maxWorkers:    maxWorkers,
+		queueCapacity: queueCapacity,
+		idleTimeout:   defaultIdleTimeout,
+		panicHandler:  defaultPanicHandler,
+		stopSignal:    make(chan struct{}),
+	}
+
+	for _, opt := range options {
+		opt(p)
+	}
+
+	if p.maxWorkers <= 0 {
+		p.maxWorkers = 1
+	}
+
+	if p.minWorkers > p.maxWorkers {
+		p.minWorkers = p.maxWorkers
+	}
+
+	if p.idleTimeout <= 0 {
+		p.idleTimeout = defaultIdleTimeout
+	}
+
+	if p.ctx == nil {
+		p.ctx, p.ctxCancel = context.WithCancel(context.Background())
+	}
+
+	if p.queueCapacity <= 0 {
+		p.queueCapacity = 1
+	}
+
+	p.taskQueue = make(chan func(), p.queueCapacity)
+
+	for i := 0; i < p.minWorkers; i++ {
+		p.startWorker()
+	}
+
+	p.startPurger()
+
+	return p
+}
+
+// Stopped reports if the pool is closed and no longer accepts tasks.
+func (p *Pool) Stopped() bool {
+	return atomic.LoadInt32(&p.stopped) == 1
+}
+
+func (p *Pool) RunningWorkers() int {
+	return int(atomic.LoadInt32(&p.workerCount))
+}
+
+func (p *Pool) IdleWorkers() int {
+	return int(atomic.LoadInt32(&p.idleWorkerCount))
+}
+
+func (p *Pool) PendingTasks() int {
+	return len(p.taskQueue)
+}
+
+func (p *Pool) IdleTimeout() time.Duration {
+	return p.idleTimeout
+}
+
+func (p *Pool) MinWorkers() int {
+	return p.minWorkers
+}
+
+func (p *Pool) MaxWorkers() int {
+	return p.maxWorkers
+}
+
+func (p *Pool) QueueCapacity() int {
+	return p.queueCapacity
+}
+
+// Submit adds a task to the pool. Blocks if the queue is full.
+// Skips if the pool context is done, or if the task is nil.
+func (p *Pool) Submit(task func()) {
+	if task == nil {
+		return
+	}
+
+	if p.Stopped() {
+		panic(ErrPoolStopped)
+	}
+
+	defer p.tryStartWorker()
+
+	p.tasksWg.Add(1)
+	p.taskQueue <- func() {
+		defer p.tasksWg.Done()
+
+		select {
+		case <-p.ctx.Done():
+			return
+		default:
+		}
+
+		task()
+	}
+}
+
+// Stop closes the task queue. No new tasks can be submitted after this.
+func (p *Pool) Stop() {
+	p.stop(false)
+}
+
+// StopAndWait stops the pool and waits for all tasks to finish.
+func (p *Pool) StopAndWait() {
+	p.stop(true)
+}
+
+func (p *Pool) stop(waitQueueTasksComplete bool) {
+	p.stopOnce.Do(func() {
+		atomic.StoreInt32(&p.stopped, 1)
+
+		if waitQueueTasksComplete {
+			p.tasksWg.Wait()
+		} else {
+			p.ctxCancel()
+		}
+
+		close(p.stopSignal)
+
+		p.purgerWg.Wait()
+		p.workersWg.Wait()
+
+		close(p.taskQueue)
+	})
+}
+
+func (p *Pool) startWorker() {
+	p.workersWg.Add(1)
+	go func() {
+		defer p.workersWg.Done()
+		worker(p.taskQueue, p.stopSignal, p.panicHandler, &p.workerCount, &p.idleWorkerCount)
+	}()
+}
+
+func (p *Pool) canStartWorker() bool {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	return p.IdleWorkers() == 0 && p.RunningWorkers() < p.MaxWorkers() && p.PendingTasks() > 0 && !p.Stopped()
+}
+
+func (p *Pool) tryStartWorker() bool {
+	if !p.canStartWorker() {
+		return false
+	}
+	p.startWorker()
+	return true
+}
+
+func worker(tasks chan func(), stopSignal chan struct{}, panicHandler func(r any), workerCount *int32, idleWorkerCount *int32) {
+	atomic.AddInt32(workerCount, 1)
+	defer atomic.AddInt32(workerCount, -1)
+
+	for {
+		atomic.AddInt32(idleWorkerCount, 1)
+		select {
+		case <-stopSignal:
+			return
+		case task, ok := <-tasks:
+			atomic.AddInt32(idleWorkerCount, -1)
+
+			// Shutdown or idle timeout signal received, exit worker.
+			if !ok || task == nil {
+				return
+			}
+
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						panicHandler(r)
+					}
+				}()
+				task()
+			}()
+		}
+	}
+}
+
+func (p *Pool) startPurger() {
+	p.purgerWg.Add(1)
+	go func() {
+		defer p.purgerWg.Done()
+		p.purgeWorkers()
+	}()
+}
+
+func (p *Pool) purgeWorkers() {
+	ticker := time.NewTicker(p.idleTimeout)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.stopSignal:
+			return
+		case <-ticker.C:
+			if !p.canPurgeWorker() {
+				continue
+			}
+
+			select {
+			case p.taskQueue <- nil:
+				// Only purge if we can send to the task queue
+				// Send signal to stop an idle worker
+			default:
+				// Queue full: skip purge attempt
+			}
+		}
+	}
+}
+
+func (p *Pool) canPurgeWorker() bool {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	return p.IdleWorkers() > 0 && p.RunningWorkers() > p.minWorkers && !p.Stopped()
+}
+
+type Option func(*Pool)
+
+func WithMinWorkers(minWorkers int) Option {
+	return func(p *Pool) {
+		p.minWorkers = minWorkers
+	}
+}
+
+func WithIdleTimeout(idleTimeout time.Duration) Option {
+	return func(p *Pool) {
+		p.idleTimeout = idleTimeout
+	}
+}
+
+// WithContext sets a context for the pool.
+func WithContext(parentCtx context.Context) Option {
+	return func(p *Pool) {
+		p.ctx, p.ctxCancel = context.WithCancel(parentCtx)
+	}
+}
+
+// WithPanicHandler sets a panic handler for the pool.
+func WithPanicHandler(panicHandler func(r any)) Option {
+	return func(p *Pool) {
+		p.panicHandler = panicHandler
+	}
+}
+
+// NewGroup creates a new TaskGroup with context.Background().
+func (p *Pool) NewGroup() *TaskGroup {
+	return p.NewGroupContext(context.Background())
+}
+
+// NewGroupContext creates a new TaskGroup with the given context.
+func (p *Pool) NewGroupContext(parentCtx context.Context) *TaskGroup {
+	ctx, ctxCancel := context.WithCancel(parentCtx)
+	return &TaskGroup{
+		pool:      p,
+		ctx:       ctx,
+		ctxCancel: ctxCancel,
+	}
+}
+
+// TaskGroup allows tracking a batch of related tasks.
+type TaskGroup struct {
+	pool      *Pool
+	wg        sync.WaitGroup
+	ctx       context.Context
+	ctxCancel context.CancelFunc
+}
+
+// Submit adds a task to the group and schedules it in the pool.
+// Skips if the group or pool context is done, or if the task is nil.
+func (g *TaskGroup) Submit(task func()) {
+	if task == nil {
+		return
+	}
+
+	if g.pool.Stopped() {
+		panic(ErrPoolStopped)
+	}
+
+	defer g.pool.tryStartWorker()
+
+	g.wg.Add(1)
+	g.pool.tasksWg.Add(1)
+	g.pool.taskQueue <- func() {
+		defer g.pool.tasksWg.Done()
+		defer g.wg.Done()
+
+		select {
+		case <-g.ctx.Done():
+			return
+		case <-g.pool.ctx.Done():
+			return
+		default:
+		}
+
+		task()
+	}
+}
+
+// Wait blocks until all tasks in the group are done.
+func (g *TaskGroup) Wait() {
+	g.wg.Wait()
+}
