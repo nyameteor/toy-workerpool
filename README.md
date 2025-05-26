@@ -8,13 +8,13 @@ A Golang project to learn and practice concurrency.
 
 - [x] v1: Basic fixed-size pool, task submission, and graceful shutdown.
 - [x] v2: Adds context support and panic recovery inside workers.
-- [ ] v3: Support idle timeout to dynamically resize workers.
+- [x] v3: Support dynamic worker scaling with on-demand start and idle timeout.
 - [ ] v4: Switch to dedicated queues (push model) for better scalability.
 - [ ] v5: Support task results and errors (Future-like interface).
 
 ### Design: Key Concepts & Strategies
 
-#### Task Dispatching
+#### Task Dispatching Models
 
 - **Centralized Queue (Pull Model)**:
 
@@ -30,31 +30,70 @@ A Golang project to learn and practice concurrency.
   - Pros: Reduces contention, improves throughput and cache locality.
   - Cons: More complex implementation.
 
-#### Worker Management
-
-- **Fixed-Size Pool**:
-  - Pros: Predictable resource use.
-  - Cons: Inefficient under bursty workloads.
-
-- **Dynamic-Size Pool**:
-  - Pros: Adapts to workload, better resource efficiency.
-  - Cons: More complexity managing worker creation and shutdown.
-
-- **Idle Timeout**:
-
-  Removes workers after being idle for some duration to conserve resources.
-
-#### Worker Resize Strategies
-
-- **Eager:** Maximize responsiveness by starting many workers upfront.
-- **Balanced:** Trade-off between responsiveness and throughput.
-- **Lazy:** Maximize throughput with minimal active workers (like Python's ThreadPoolExecutor).
-
 #### Queue Strategies
 
 - **Unbounded Queue**: Simple, but risks unbounded memory growth under heavy load.
 - **Bounded Queue**: Controls memory use and backpressure but may block or reject tasks if full.
 - **Priority Queue**: Supports task prioritization at some overhead cost.
+
+#### Worker Management Models
+
+- **Fixed-Size Pool**:
+  - Pros: Predictable resource usage, simple implementation.
+  - Cons: Inflexible under bursty or variable workloads.
+
+- **Dynamic-Size Pool**:
+  - Pros: Scales with demand, improves resource efficiency.
+  - Cons: Requires careful synchronization and lifecycle management.
+
+#### Worker Scale-up Strategies
+
+- **On-Demand (Reactive)**:
+
+  Spawn a new worker when a task arrives and all current workers are busy.
+
+  - Common in dynamic pools where quick responsiveness is prioritized.
+  - Pros: Simple, responsive to load spikes.
+  - Cons: Risk of overprovisioning during temporary spikes.
+
+- **Preemptive (Proactive)**:
+
+  Periodically estimate future workload and increase workers in advance.
+
+  - Suitable for systems with predictable load patterns or periodic bursts.
+  - Pros: Minimizes task queueing latency.
+  - Cons: Requires load forecasting; risk of under/overestimating.
+
+- **Warm-Up Pool**:
+
+  Maintain a few pre-spawned idle workers ("warm pool") to reduce spin-up latency.
+
+  - Pros: Improves responsiveness without full eager scaling.
+  - Cons: Slightly higher idle resource usage.
+
+#### Worker Scale-down Strategies
+
+- **Idle Timeout (TTL - Time to Live)**:
+
+  A worker terminates itself after being idle for a configured duration.
+
+  - Most common method in dynamic pools for reclaiming unused resources.
+  - Pros: Simple, adaptive to demand drops.
+  - Cons: May cause cold-start delays if tasks return shortly after scale-down.
+
+- **Periodic Reaper**:
+
+  A background goroutine periodically checks for excess or idle workers and stops them.
+
+  - Offers centralized control and can enforce stricter resource limits.
+  - Pros: More deterministic control over worker count.
+  - Cons: Higher implementation complexity.
+
+#### Worker Resize Policies
+
+- **Eager**: Maximize responsiveness by aggressively scaling up.
+- **Balanced**: Trade-off between responsiveness and throughput.
+- **Lazy:** Maximize throughput with minimal active workers (like Python's ThreadPoolExecutor).
 
 #### Rejection Strategies
 
