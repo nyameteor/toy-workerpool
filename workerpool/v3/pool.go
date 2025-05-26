@@ -87,7 +87,7 @@ func NewPool(maxWorkers, queueCapacity int, options ...Option) *Pool {
 	p.taskQueue = make(chan func(), p.queueCapacity)
 
 	for i := 0; i < p.minWorkers; i++ {
-		p.startWorker()
+		p.tryStartWorker()
 	}
 
 	p.startPurger()
@@ -171,9 +171,11 @@ func (p *Pool) stop(waitQueueTasksComplete bool) {
 
 		if waitQueueTasksComplete {
 			p.tasksWg.Wait()
-		} else {
-			p.ctxCancel()
 		}
+
+		p.resetWorkerCount()
+
+		p.ctxCancel()
 
 		close(p.stopSignal)
 
@@ -184,43 +186,102 @@ func (p *Pool) stop(waitQueueTasksComplete bool) {
 	})
 }
 
-func (p *Pool) startWorker() {
-	p.workersWg.Add(1)
-	go func() {
-		defer p.workersWg.Done()
-		worker(p.taskQueue, p.stopSignal, p.panicHandler, &p.workerCount, &p.idleWorkerCount)
-	}()
-}
-
-func (p *Pool) canStartWorker() bool {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
-	return p.IdleWorkers() == 0 && p.RunningWorkers() < p.MaxWorkers() && p.PendingTasks() > 0 && !p.Stopped()
-}
-
 func (p *Pool) tryStartWorker() bool {
-	if !p.canStartWorker() {
+	if !p.tryIncWorkerCount() {
 		return false
 	}
-	p.startWorker()
+
+	go func() {
+		defer p.workersWg.Done()
+		worker(p.taskQueue, p.stopSignal, p.panicHandler, &p.idleWorkerCount)
+	}()
+
 	return true
 }
 
-func worker(tasks chan func(), stopSignal chan struct{}, panicHandler func(r any), workerCount *int32, idleWorkerCount *int32) {
-	atomic.AddInt32(workerCount, 1)
-	defer atomic.AddInt32(workerCount, -1)
+func (p *Pool) tryStopIdleWorker() bool {
+	if !p.tryDecWorkerCount() {
+		return false
+	}
 
+	select {
+	// Only purge if we can send to the task queue
+	case p.taskQueue <- nil:
+		// Send signal to stop an idle worker
+		return true
+	default:
+		// Queue full: skip purge attempt
+		// (roll back the decrement)
+		atomic.AddInt32(&p.workerCount, 1)
+		atomic.AddInt32(&p.idleWorkerCount, 1)
+		return false
+	}
+}
+
+func (p *Pool) tryIncWorkerCount() bool {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if p.RunningWorkers() >= p.MaxWorkers() {
+		return false
+	}
+
+	if p.PendingTasks() == 0 || p.IdleWorkers() > 0 || p.Stopped() {
+		return false
+	}
+
+	// Increment running worker count *before* starting the goroutine to
+	// ensure the count is accurate and prevent exceeding MaxWorkers
+	// due to race conditions between checking and actual worker startup.
+	atomic.AddInt32(&p.workerCount, 1)
+
+	p.workersWg.Add(1)
+
+	return true
+}
+
+func (p *Pool) tryDecWorkerCount() bool {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if p.RunningWorkers() <= p.MinWorkers() {
+		return false
+	}
+
+	if p.IdleWorkers() <= 0 || p.Stopped() {
+		return false
+	}
+
+	// Decrement running worker count *before* stop the goroutine to
+	// ensure the count is accurate and prevent exceeding MinWorkers
+	// due to race conditions between checking and actual worker stop.
+	atomic.AddInt32(&p.workerCount, -1)
+
+	atomic.AddInt32(&p.idleWorkerCount, -1)
+
+	return true
+}
+
+func (p *Pool) resetWorkerCount() {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	atomic.StoreInt32(&p.workerCount, 0)
+
+	atomic.StoreInt32(&p.idleWorkerCount, 0)
+}
+
+func worker(taskQueue chan func(), stopSignal chan struct{}, panicHandler func(r any), idleWorkerCount *int32) {
 	for {
 		atomic.AddInt32(idleWorkerCount, 1)
 		select {
 		case <-stopSignal:
 			return
-		case task, ok := <-tasks:
+		case task := <-taskQueue:
 			atomic.AddInt32(idleWorkerCount, -1)
 
-			// Shutdown or idle timeout signal received, exit worker.
-			if !ok || task == nil {
+			if task == nil {
+				// Shutdown signal for idle worker
 				return
 			}
 
@@ -240,39 +301,24 @@ func (p *Pool) startPurger() {
 	p.purgerWg.Add(1)
 	go func() {
 		defer p.purgerWg.Done()
-		p.purgeWorkers()
+		purger(p.idleTimeout, p.stopSignal, func() {
+			p.tryStopIdleWorker()
+		})
 	}()
 }
 
-func (p *Pool) purgeWorkers() {
-	ticker := time.NewTicker(p.idleTimeout)
+func purger(idleTimeout time.Duration, stopSignal chan struct{}, tryStopIdleWorker func()) {
+	ticker := time.NewTicker(idleTimeout)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-p.stopSignal:
+		case <-stopSignal:
 			return
 		case <-ticker.C:
-			if !p.canPurgeWorker() {
-				continue
-			}
-
-			select {
-			case p.taskQueue <- nil:
-				// Only purge if we can send to the task queue
-				// Send signal to stop an idle worker
-			default:
-				// Queue full: skip purge attempt
-			}
+			tryStopIdleWorker()
 		}
 	}
-}
-
-func (p *Pool) canPurgeWorker() bool {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
-	return p.IdleWorkers() > 0 && p.RunningWorkers() > p.minWorkers && !p.Stopped()
 }
 
 type Option func(*Pool)

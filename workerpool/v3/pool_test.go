@@ -3,6 +3,7 @@ package v3
 import (
 	"context"
 	"fmt"
+	"math"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -202,6 +203,81 @@ func TestStopWithPurging(t *testing.T) {
 	pool.StopAndWait()
 
 	assert.Equal(t, 0, pool.RunningWorkers())
+}
+
+func TestWorkersNotExceedLimit(t *testing.T) {
+	const (
+		minWorkers    = 5
+		maxWorkers    = 10
+		idleTimeout   = 10 * time.Millisecond
+		burstRounds   = 3
+		tasksPerBurst = 50
+	)
+
+	pool := NewPool(maxWorkers, 100, WithMinWorkers(minWorkers), WithIdleTimeout(idleTimeout))
+
+	// Allow time for the pool to start initial workers
+	time.Sleep(100 * time.Millisecond)
+
+	var maxObserved atomic.Int32
+	var minObserved atomic.Int32
+	minObserved.Store(math.MaxInt32)
+
+	logCh := make(chan string, 1000)
+	done := make(chan struct{})
+
+	// Start logger (safe t.Log use)
+	// go func() {
+	// 	for msg := range logCh {
+	// 		t.Log(msg)
+	// 	}
+	// }()
+
+	// Start worker count observer
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				cur := int32(pool.RunningWorkers())
+				if cur > maxObserved.Load() {
+					maxObserved.Store(cur)
+				}
+				if cur < minObserved.Load() {
+					minObserved.Store(cur)
+				}
+				logCh <- fmt.Sprintf("Current workers: %d", cur)
+			}
+		}
+	}()
+
+	// Submit bursts of short-lived tasks
+	for r := 0; r < burstRounds; r++ {
+		for i := 0; i < tasksPerBurst; i++ {
+			pool.Submit(func() {
+				time.Sleep(10 * time.Millisecond)
+			})
+		}
+		// Allow idle timeout to trigger purging between bursts
+		time.Sleep(10 * idleTimeout)
+	}
+
+	close(done)
+	pool.StopAndWait()
+
+	if maxObserved.Load() > int32(maxWorkers) {
+		t.Errorf("workers exceeded maxWorkers limit: %d, maxObserved: %d", maxWorkers, maxObserved.Load())
+	}
+	if minObserved.Load() < int32(minWorkers) {
+		t.Errorf("workers dropped below minWorkers limit: %d, minObserved: %d", minWorkers, minObserved.Load())
+	}
+
+	t.Logf("Max observed workers: %d", maxObserved.Load())
+	t.Logf("Min observed workers: %d", minObserved.Load())
 }
 
 func TestNoWorkerLeak(t *testing.T) {
