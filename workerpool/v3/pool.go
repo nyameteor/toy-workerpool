@@ -95,7 +95,6 @@ func NewPool(maxWorkers, queueCapacity int, options ...Option) *Pool {
 	return p
 }
 
-// Stopped reports if the pool is closed and no longer accepts tasks.
 func (p *Pool) Stopped() bool {
 	return atomic.LoadInt32(&p.stopped) == 1
 }
@@ -173,7 +172,7 @@ func (p *Pool) stop(waitQueueTasksComplete bool) {
 			p.tasksWg.Wait()
 		}
 
-		p.resetWorkerCount()
+		p.resetWorkerSlot()
 
 		p.ctxCancel()
 
@@ -187,10 +186,19 @@ func (p *Pool) stop(waitQueueTasksComplete bool) {
 }
 
 func (p *Pool) tryStartWorker() bool {
-	if !p.tryIncWorkerCount() {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	// check if it's safe to start a new worker
+	if p.RunningWorkers() >= p.MaxWorkers() || p.IdleWorkers() > 0 ||
+		p.PendingTasks() == 0 || p.Stopped() {
 		return false
 	}
 
+	// acquire worker slot
+	atomic.AddInt32(&p.workerCount, 1)
+
+	p.workersWg.Add(1)
 	go func() {
 		defer p.workersWg.Done()
 		worker(p.taskQueue, p.stopSignal, p.panicHandler, &p.idleWorkerCount)
@@ -200,74 +208,36 @@ func (p *Pool) tryStartWorker() bool {
 }
 
 func (p *Pool) tryStopIdleWorker() bool {
-	if !p.tryDecWorkerCount() {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	// check if it's safe to stop an idle worker
+	if p.RunningWorkers() <= p.MinWorkers() ||
+		p.IdleWorkers() <= 0 || p.Stopped() {
 		return false
 	}
 
+	// release worker slot
+	atomic.AddInt32(&p.workerCount, -1)
+	atomic.AddInt32(&p.idleWorkerCount, -1)
+
+	// send stop signal (nil task) to an idle worker
 	select {
-	// Only purge if we can send to the task queue
 	case p.taskQueue <- nil:
-		// Send signal to stop an idle worker
 		return true
 	default:
-		// Queue full: skip purge attempt
-		// (roll back the decrement)
+		// queue full, rollback slot release
 		atomic.AddInt32(&p.workerCount, 1)
 		atomic.AddInt32(&p.idleWorkerCount, 1)
 		return false
 	}
 }
 
-func (p *Pool) tryIncWorkerCount() bool {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
-	if p.RunningWorkers() >= p.MaxWorkers() {
-		return false
-	}
-
-	if p.PendingTasks() == 0 || p.IdleWorkers() > 0 || p.Stopped() {
-		return false
-	}
-
-	// Increment running worker count *before* starting the goroutine to
-	// ensure the count is accurate and prevent exceeding MaxWorkers
-	// due to race conditions between checking and actual worker startup.
-	atomic.AddInt32(&p.workerCount, 1)
-
-	p.workersWg.Add(1)
-
-	return true
-}
-
-func (p *Pool) tryDecWorkerCount() bool {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
-	if p.RunningWorkers() <= p.MinWorkers() {
-		return false
-	}
-
-	if p.IdleWorkers() <= 0 || p.Stopped() {
-		return false
-	}
-
-	// Decrement running worker count *before* stop the goroutine to
-	// ensure the count is accurate and prevent exceeding MinWorkers
-	// due to race conditions between checking and actual worker stop.
-	atomic.AddInt32(&p.workerCount, -1)
-
-	atomic.AddInt32(&p.idleWorkerCount, -1)
-
-	return true
-}
-
-func (p *Pool) resetWorkerCount() {
+func (p *Pool) resetWorkerSlot() {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 
 	atomic.StoreInt32(&p.workerCount, 0)
-
 	atomic.StoreInt32(&p.idleWorkerCount, 0)
 }
 
@@ -281,7 +251,7 @@ func worker(taskQueue chan func(), stopSignal chan struct{}, panicHandler func(r
 			atomic.AddInt32(idleWorkerCount, -1)
 
 			if task == nil {
-				// Shutdown signal for idle worker
+				// receive stop signal for idle worker
 				return
 			}
 
