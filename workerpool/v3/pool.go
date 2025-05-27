@@ -22,7 +22,7 @@ func defaultPanicHandler(r any) {
 	log.Printf("Worker panic recovered: %v\n", r)
 }
 
-// Pool manages a set of worker goroutines to run submitted tasks.
+// NewPool creates a new Pool with dynamic scaling up to maxWorkers and a bounded task queue.
 type Pool struct {
 	// Atomic counters, placed first for proper alignment
 	workerCount     int32
@@ -49,7 +49,6 @@ type Pool struct {
 }
 
 // NewPool creates a new Pool with the given number of workers and task queue capacity.
-// If no context is set, context.Background() is used.
 func NewPool(maxWorkers, queueCapacity int, options ...Option) *Pool {
 	p := &Pool{
 		minWorkers:    defaultMinWorkers,
@@ -95,34 +94,72 @@ func NewPool(maxWorkers, queueCapacity int, options ...Option) *Pool {
 	return p
 }
 
+type Option func(*Pool)
+
+// WithMinWorkers sets the minimum number of workers.
+func WithMinWorkers(minWorkers int) Option {
+	return func(p *Pool) {
+		p.minWorkers = minWorkers
+	}
+}
+
+// WithIdleTimeout sets the idle timeout for workers.
+func WithIdleTimeout(idleTimeout time.Duration) Option {
+	return func(p *Pool) {
+		p.idleTimeout = idleTimeout
+	}
+}
+
+// WithContext sets the parent context for the pool.
+func WithContext(parentCtx context.Context) Option {
+	return func(p *Pool) {
+		p.ctx, p.ctxCancel = context.WithCancel(parentCtx)
+	}
+}
+
+// WithPanicHandler sets a panic handler for the pool.
+func WithPanicHandler(panicHandler func(r any)) Option {
+	return func(p *Pool) {
+		p.panicHandler = panicHandler
+	}
+}
+
+// Stopped reports if the pool has been stopped.
 func (p *Pool) Stopped() bool {
 	return atomic.LoadInt32(&p.stopped) == 1
 }
 
+// RunningWorkers returns the number of currently running workers.
 func (p *Pool) RunningWorkers() int {
 	return int(atomic.LoadInt32(&p.workerCount))
 }
 
+// IdleWorkers returns the number of currently idle workers.
 func (p *Pool) IdleWorkers() int {
 	return int(atomic.LoadInt32(&p.idleWorkerCount))
 }
 
+// PendingTasks returns the number of tasks waiting in the queue.
 func (p *Pool) PendingTasks() int {
 	return len(p.taskQueue)
 }
 
+// IdleTimeout returns the configured idle timeout.
 func (p *Pool) IdleTimeout() time.Duration {
 	return p.idleTimeout
 }
 
+// MinWorkers returns the configured minimum number of workers.
 func (p *Pool) MinWorkers() int {
 	return p.minWorkers
 }
 
+// MaxWorkers returns the configured maximum number of workers.
 func (p *Pool) MaxWorkers() int {
 	return p.maxWorkers
 }
 
+// QueueCapacity returns the capacity of the task queue.
 func (p *Pool) QueueCapacity() int {
 	return p.queueCapacity
 }
@@ -154,16 +191,19 @@ func (p *Pool) Submit(task func()) {
 	}
 }
 
-// Stop closes the task queue. No new tasks can be submitted after this.
+// Stop shuts down the pool without waiting for queued tasks to complete.
+// Tasks currently being executed by workers will complete.
 func (p *Pool) Stop() {
 	p.stop(false)
 }
 
-// StopAndWait stops the pool and waits for all tasks to finish.
+// StopAndWait shuts down the pool after all queued tasks have been completed.
 func (p *Pool) StopAndWait() {
 	p.stop(true)
 }
 
+// stop shuts down the pool, optionally waiting for queued tasks to complete.
+// It stops all workers and the purger, cancels the context, and closes the task queue.
 func (p *Pool) stop(waitQueueTasksComplete bool) {
 	p.stopOnce.Do(func() {
 		atomic.StoreInt32(&p.stopped, 1)
@@ -291,40 +331,20 @@ func purger(idleTimeout time.Duration, stopSignal chan struct{}, tryStopIdleWork
 	}
 }
 
-type Option func(*Pool)
-
-func WithMinWorkers(minWorkers int) Option {
-	return func(p *Pool) {
-		p.minWorkers = minWorkers
-	}
+// TaskGroup allows tracking a batch of related tasks.
+type TaskGroup struct {
+	pool      *Pool
+	wg        sync.WaitGroup
+	ctx       context.Context
+	ctxCancel context.CancelFunc
 }
 
-func WithIdleTimeout(idleTimeout time.Duration) Option {
-	return func(p *Pool) {
-		p.idleTimeout = idleTimeout
-	}
-}
-
-// WithContext sets a context for the pool.
-func WithContext(parentCtx context.Context) Option {
-	return func(p *Pool) {
-		p.ctx, p.ctxCancel = context.WithCancel(parentCtx)
-	}
-}
-
-// WithPanicHandler sets a panic handler for the pool.
-func WithPanicHandler(panicHandler func(r any)) Option {
-	return func(p *Pool) {
-		p.panicHandler = panicHandler
-	}
-}
-
-// NewGroup creates a new TaskGroup with context.Background().
+// NewGroup creates a new TaskGroup.
 func (p *Pool) NewGroup() *TaskGroup {
 	return p.NewGroupContext(context.Background())
 }
 
-// NewGroupContext creates a new TaskGroup with the given context.
+// NewGroupContext creates a new TaskGroup with the given context as its parent.
 func (p *Pool) NewGroupContext(parentCtx context.Context) *TaskGroup {
 	ctx, ctxCancel := context.WithCancel(parentCtx)
 	return &TaskGroup{
@@ -332,14 +352,6 @@ func (p *Pool) NewGroupContext(parentCtx context.Context) *TaskGroup {
 		ctx:       ctx,
 		ctxCancel: ctxCancel,
 	}
-}
-
-// TaskGroup allows tracking a batch of related tasks.
-type TaskGroup struct {
-	pool      *Pool
-	wg        sync.WaitGroup
-	ctx       context.Context
-	ctxCancel context.CancelFunc
 }
 
 // Submit adds a task to the group and schedules it in the pool.
