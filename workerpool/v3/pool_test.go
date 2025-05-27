@@ -32,26 +32,17 @@ func TestSubmit(t *testing.T) {
 }
 
 func TestSubmitNilTasks(t *testing.T) {
-	pool := NewPool(100, 200)
+	pool := NewPool(10, 20)
 
 	// Submit a batch of nil tasks (should be ignored)
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		pool.Submit(nil)
 	}
 
-	taskCount := 1000
-	var executedCount atomic.Int64
-
-	for i := 0; i < taskCount; i++ {
-		pool.Submit(func() {
-			time.Sleep(10 * time.Millisecond)
-			executedCount.Add(1)
-		})
-	}
+	assert.Equal(t, 0, pool.PendingTasks())
+	assert.Equal(t, 0, pool.RunningWorkers())
 
 	pool.StopAndWait()
-
-	assert.Equal(t, int64(taskCount), executedCount.Load())
 }
 
 func TestSubmitNoTasks(t *testing.T) {
@@ -337,6 +328,45 @@ func TestNewWithInvalidOptions(t *testing.T) {
 	assert.Equal(t, defaultIdleTimeout, pool.IdleTimeout())
 }
 
+func TestTryStopIdleWorkerRollback(t *testing.T) {
+	const (
+		maxWorkers    = 2
+		queueCapacity = 1
+	)
+
+	pool := NewPool(maxWorkers, queueCapacity, WithMinWorkers(0))
+
+	ready := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Submit a long-running task to occupy one worker
+	pool.Submit(func() {
+		close(ready)
+		<-ctx.Done()
+	})
+
+	// ensure task is running
+	<-ready
+
+	// fill the task queue to capacity
+	pool.taskQueue <- func() {}
+
+	// simulate 1 idle worker by manually setting counters
+	atomic.StoreInt32(&pool.idleWorkerCount, 1)
+	atomic.StoreInt32(&pool.workerCount, 1)
+
+	// should fail due to full queue and rollback
+	ok := pool.tryStopIdleWorker()
+
+	cancel()
+
+	assert.Equal(t, false, ok)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&pool.workerCount))
+	assert.Equal(t, int32(1), atomic.LoadInt32(&pool.idleWorkerCount))
+
+	pool.Stop()
+}
+
 func TestGroupSubmit(t *testing.T) {
 	pool := NewPool(100, 200)
 	group := pool.NewGroup()
@@ -355,6 +385,39 @@ func TestGroupSubmit(t *testing.T) {
 	pool.StopAndWait()
 
 	assert.Equal(t, int64(taskCount), executedCount.Load())
+}
+
+func TestGroupSubmitNilTasks(t *testing.T) {
+	pool := NewPool(10, 20)
+	group := pool.NewGroup()
+
+	// Submit a batch of nil tasks (should be ignored)
+	for i := 0; i < 1000; i++ {
+		group.Submit(nil)
+	}
+
+	assert.Equal(t, 0, pool.PendingTasks())
+	assert.Equal(t, 0, pool.RunningWorkers())
+
+	pool.StopAndWait()
+}
+
+func TestGroupSubmitToStoppedPool(t *testing.T) {
+	pool := NewPool(0, 1)
+	group := pool.NewGroup()
+	assert.Equal(t, pool.Stopped(), false)
+	pool.Stop()
+	assert.Equal(t, pool.Stopped(), true)
+
+	var err any = nil
+	func() {
+		defer func() {
+			err = recover()
+		}()
+		group.Submit(func() {})
+	}()
+
+	assert.Equal(t, ErrPoolStopped, err)
 }
 
 func TestGroupContextSkipTasks(t *testing.T) {
