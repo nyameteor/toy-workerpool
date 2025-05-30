@@ -11,7 +11,7 @@ import (
 	"github.com/nyameteor/toy-workerpool/internal/assert"
 )
 
-func TestPoolSubmit(t *testing.T) {
+func TestSubmit(t *testing.T) {
 	pool := NewPool(100, 200)
 
 	taskCount := 1000
@@ -29,7 +29,7 @@ func TestPoolSubmit(t *testing.T) {
 	assert.Equal(t, int64(taskCount), executedCount.Load())
 }
 
-func TestPoolSubmitNilTasks(t *testing.T) {
+func TestSubmitNilTasks(t *testing.T) {
 	pool := NewPool(100, 200)
 
 	// Submit a batch of nil tasks (should be ignored)
@@ -52,12 +52,12 @@ func TestPoolSubmitNilTasks(t *testing.T) {
 	assert.Equal(t, int64(taskCount), executedCount.Load())
 }
 
-func TestPoolSubmitNoTasks(t *testing.T) {
+func TestSubmitNoTasks(t *testing.T) {
 	pool := NewPool(100, 200)
 	pool.StopAndWait()
 }
 
-func TestPoolSubmitPanic(t *testing.T) {
+func TestSubmitPanic(t *testing.T) {
 	pool := NewPool(100, 200)
 
 	taskCount := 1000
@@ -99,7 +99,7 @@ func TestSubmitOnStoppedPool(t *testing.T) {
 	assert.Equal(t, ErrPoolStopped, err)
 }
 
-func TestPoolWithCustomPanicHandler(t *testing.T) {
+func TestWithPanicHandler(t *testing.T) {
 	var (
 		mu            sync.Mutex
 		capturedPanic any = nil
@@ -126,7 +126,7 @@ func TestPoolWithCustomPanicHandler(t *testing.T) {
 	assert.Equal(t, "panic now!", capturedPanic)
 }
 
-func TestPoolContextSkipTasks(t *testing.T) {
+func TestContextSkipTasks(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
@@ -149,7 +149,7 @@ func TestPoolContextSkipTasks(t *testing.T) {
 	}
 }
 
-func TestPoolSubmitContextCancel(t *testing.T) {
+func TestContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	pool := NewPool(1, 5, WithContext(ctx))

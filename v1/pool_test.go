@@ -8,7 +8,7 @@ import (
 	"github.com/nyameteor/toy-workerpool/internal/assert"
 )
 
-func TestPoolSubmit(t *testing.T) {
+func TestSubmit(t *testing.T) {
 	pool := NewPool(100, 200)
 
 	taskCount := 1000
@@ -26,7 +26,7 @@ func TestPoolSubmit(t *testing.T) {
 	assert.Equal(t, int64(taskCount), executedCount.Load())
 }
 
-func TestPoolSubmitNilTasks(t *testing.T) {
+func TestSubmitNilTasks(t *testing.T) {
 	pool := NewPool(100, 200)
 
 	// Submit a batch of nil tasks (should be ignored)
@@ -49,12 +49,12 @@ func TestPoolSubmitNilTasks(t *testing.T) {
 	assert.Equal(t, int64(taskCount), executedCount.Load())
 }
 
-func TestPoolSubmitNoTasks(t *testing.T) {
+func TestSubmitNoTasks(t *testing.T) {
 	pool := NewPool(100, 200)
 	pool.StopAndWait()
 }
 
-func TestTaskGroup(t *testing.T) {
+func TestGroupSubmit(t *testing.T) {
 	pool := NewPool(100, 200)
 	group := pool.NewGroup()
 
