@@ -6,17 +6,20 @@ import (
 
 // Pool manages a set of worker goroutines to run submitted tasks.
 type Pool struct {
-	tasks         chan func()
+	// Configuration options
 	maxWorkers    int
 	queueCapacity int
-	wg            sync.WaitGroup
-	stopOnce      sync.Once
+
+	// Internal state
+	taskQueue chan func()
+	wg        sync.WaitGroup
+	stopOnce  sync.Once
 }
 
 // NewPool creates a new Pool with the given number of workers and task queue capacity.
 func NewPool(maxWorkers, queueCapacity int) *Pool {
 	p := &Pool{
-		tasks:         make(chan func(), queueCapacity),
+		taskQueue:     make(chan func(), queueCapacity),
 		maxWorkers:    maxWorkers,
 		queueCapacity: queueCapacity,
 	}
@@ -31,7 +34,7 @@ func (p *Pool) Submit(task func()) {
 	}
 
 	p.wg.Add(1)
-	p.tasks <- func() {
+	p.taskQueue <- func() {
 		defer p.wg.Done()
 		task()
 	}
@@ -40,25 +43,20 @@ func (p *Pool) Submit(task func()) {
 // Stop closes the task queue. No new tasks can be submitted after this.
 func (p *Pool) Stop() {
 	p.stopOnce.Do(func() {
-		close(p.tasks)
+		close(p.taskQueue)
 	})
-}
-
-// Wait blocks until all submitted tasks are finished.
-func (p *Pool) Wait() {
-	p.wg.Wait()
 }
 
 // StopAndWait stops the pool and waits for all tasks to finish.
 func (p *Pool) StopAndWait() {
 	p.Stop()
-	p.Wait()
+	p.wg.Wait()
 }
 
 // startWorkers launches the worker goroutines.
 func (p *Pool) startWorkers() {
 	for i := 0; i < p.maxWorkers; i++ {
-		go worker(p.tasks)
+		go worker(p.taskQueue)
 	}
 }
 
