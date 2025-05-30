@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nyameteor/learn-go-concurrency/internal/assert"
+	"github.com/nyameteor/toy-workerpool/internal/assert"
 )
 
 func TestSubmit(t *testing.T) {

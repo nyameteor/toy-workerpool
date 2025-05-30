@@ -1,3 +1,3 @@
-module github.com/nyameteor/learn-go-concurrency
+module github.com/nyameteor/toy-workerpool
 
 go 1.24.2

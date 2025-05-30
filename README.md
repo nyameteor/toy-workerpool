@@ -1,10 +1,8 @@
-# learn-go-concurrency
+# toy-workerpool
 
-A Golang project to learn and practice concurrency.
+A toy project to learn and build worker pools in Go from scratch.
 
-## Worker Pool
-
-### Progress
+## Progress
 
 - [x] v1: Basic fixed-size pool, task submission, and graceful shutdown.
 - [x] v2: Adds context support and panic recovery inside workers.
@@ -12,9 +10,9 @@ A Golang project to learn and practice concurrency.
 - [ ] v4: Switch to dedicated queues (push model) for better scalability.
 - [ ] v5: Support task results and errors (Future-like interface).
 
-### Design: Key Concepts & Strategies
+## Design: Key Concepts & Strategies
 
-#### Task Dispatching Models
+### Task Dispatching Models
 
 - **Centralized Queue (Pull Model)**:
 
@@ -30,13 +28,13 @@ A Golang project to learn and practice concurrency.
   - Pros: Reduces contention, improves throughput and cache locality.
   - Cons: More complex implementation.
 
-#### Queue Strategies
+### Queue Strategies
 
 - **Unbounded Queue**: Simple, but risks unbounded memory growth under heavy load.
 - **Bounded Queue**: Controls memory use and backpressure but may block or reject tasks if full.
 - **Priority Queue**: Supports task prioritization at some overhead cost.
 
-#### Worker Management Models
+### Worker Management Models
 
 - **Fixed-Size Pool**:
   - Pros: Predictable resource usage, simple implementation.
@@ -46,7 +44,7 @@ A Golang project to learn and practice concurrency.
   - Pros: Scales with demand, improves resource efficiency.
   - Cons: Requires careful synchronization and lifecycle management.
 
-#### Worker Scale-up Strategies
+### Worker Scale-up Strategies
 
 - **On-Demand (Reactive)**:
 
@@ -71,7 +69,7 @@ A Golang project to learn and practice concurrency.
   - Pros: Improves responsiveness without full eager scaling.
   - Cons: Slightly higher idle resource usage.
 
-#### Worker Scale-down Strategies
+### Worker Scale-down Strategies
 
 - **Idle Timeout (TTL - Time to Live)**:
 
@@ -89,13 +87,13 @@ A Golang project to learn and practice concurrency.
   - Pros: More deterministic control over worker count.
   - Cons: Higher implementation complexity.
 
-#### Worker Resize Policies
+### Worker Resize Policies
 
 - **Eager**: Maximize responsiveness by aggressively scaling up.
 - **Balanced**: Trade-off between responsiveness and throughput.
 - **Lazy:** Maximize throughput with minimal active workers (like Python's ThreadPoolExecutor).
 
-#### Rejection Strategies
+### Rejection Strategies
 
 When the queue is full:
 
@@ -112,6 +110,8 @@ go test -race ./...
 ```
 
 ## References
+
+Thanks to these repositories for inspiration and guidance:
 
 - [alitto/pond](https://github.com/alitto/pond)
 - [panjf2000/ants](https://github.com/panjf2000/ants)
