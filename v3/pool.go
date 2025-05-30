@@ -22,20 +22,16 @@ func defaultPanicHandler(r any) {
 	log.Printf("Worker panic recovered: %v\n", r)
 }
 
-// NewPool creates a new Pool with dynamic scaling up to maxWorkers and a bounded task queue.
+// Pool manages a set of worker goroutines to run submitted tasks.
 type Pool struct {
-	// Atomic counters, placed first for proper alignment
-	workerCount     int32
-	idleWorkerCount int32
-
 	// Configuration options
 	minWorkers    int
 	maxWorkers    int
 	queueCapacity int
+	panicHandler  func(r any)
+	idleTimeout   time.Duration
 	ctx           context.Context
 	ctxCancel     context.CancelFunc
-	idleTimeout   time.Duration
-	panicHandler  func(r any)
 
 	// Internal state
 	taskQueue  chan func()
@@ -45,7 +41,11 @@ type Pool struct {
 	purgerWg   sync.WaitGroup
 	stopOnce   sync.Once
 	stopSignal chan struct{}
-	stopped    int32
+	stopped    atomic.Bool
+
+	// Atomic counters
+	workerCount     atomic.Int32
+	idleWorkerCount atomic.Int32
 }
 
 // NewPool creates a new Pool with the given number of workers and task queue capacity.
@@ -126,17 +126,17 @@ func WithPanicHandler(panicHandler func(r any)) Option {
 
 // Stopped reports if the pool has been stopped.
 func (p *Pool) Stopped() bool {
-	return atomic.LoadInt32(&p.stopped) == 1
+	return p.stopped.Load()
 }
 
 // RunningWorkers returns the number of currently running workers.
 func (p *Pool) RunningWorkers() int {
-	return int(atomic.LoadInt32(&p.workerCount))
+	return int(p.workerCount.Load())
 }
 
 // IdleWorkers returns the number of currently idle workers.
 func (p *Pool) IdleWorkers() int {
-	return int(atomic.LoadInt32(&p.idleWorkerCount))
+	return int(p.idleWorkerCount.Load())
 }
 
 // PendingTasks returns the number of tasks waiting in the queue.
@@ -206,7 +206,7 @@ func (p *Pool) StopAndWait() {
 // It stops all workers and the purger, cancels the context, and closes the task queue.
 func (p *Pool) stop(waitQueueTasksComplete bool) {
 	p.stopOnce.Do(func() {
-		atomic.StoreInt32(&p.stopped, 1)
+		p.stopped.Store(true)
 
 		if waitQueueTasksComplete {
 			p.tasksWg.Wait()
@@ -236,7 +236,7 @@ func (p *Pool) tryStartWorker() bool {
 	}
 
 	// acquire worker slot
-	atomic.AddInt32(&p.workerCount, 1)
+	p.workerCount.Add(1)
 
 	p.workersWg.Add(1)
 	go func() {
@@ -258,8 +258,8 @@ func (p *Pool) tryStopIdleWorker() bool {
 	}
 
 	// release worker slot
-	atomic.AddInt32(&p.workerCount, -1)
-	atomic.AddInt32(&p.idleWorkerCount, -1)
+	p.workerCount.Add(-1)
+	p.idleWorkerCount.Add(-1)
 
 	// send stop signal (nil task) to an idle worker
 	select {
@@ -267,8 +267,8 @@ func (p *Pool) tryStopIdleWorker() bool {
 		return true
 	default:
 		// queue full, rollback slot release
-		atomic.AddInt32(&p.workerCount, 1)
-		atomic.AddInt32(&p.idleWorkerCount, 1)
+		p.workerCount.Add(1)
+		p.idleWorkerCount.Add(1)
 		return false
 	}
 }
@@ -277,18 +277,18 @@ func (p *Pool) resetWorkerSlot() {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 
-	atomic.StoreInt32(&p.workerCount, 0)
-	atomic.StoreInt32(&p.idleWorkerCount, 0)
+	p.workerCount.Store(0)
+	p.idleWorkerCount.Store(0)
 }
 
-func worker(taskQueue chan func(), stopSignal chan struct{}, panicHandler func(r any), idleWorkerCount *int32) {
+func worker(taskQueue chan func(), stopSignal chan struct{}, panicHandler func(r any), idleWorkerCount *atomic.Int32) {
 	for {
-		atomic.AddInt32(idleWorkerCount, 1)
+		idleWorkerCount.Add(1)
 		select {
 		case <-stopSignal:
 			return
 		case task := <-taskQueue:
-			atomic.AddInt32(idleWorkerCount, -1)
+			idleWorkerCount.Add(-1)
 
 			if task == nil {
 				// receive stop signal for idle worker

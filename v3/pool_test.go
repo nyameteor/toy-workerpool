@@ -351,18 +351,25 @@ func TestTryStopIdleWorkerRollback(t *testing.T) {
 	// fill the task queue to capacity
 	pool.taskQueue <- func() {}
 
+	assert.Equal(t, int32(1), pool.workerCount.Load())
+	assert.Equal(t, int32(0), pool.idleWorkerCount.Load())
+
 	// simulate 1 idle worker by manually setting counters
-	atomic.StoreInt32(&pool.idleWorkerCount, 1)
-	atomic.StoreInt32(&pool.workerCount, 1)
+	pool.idleWorkerCount.Add(1)
+	pool.workerCount.Add(1)
+
+	assert.Equal(t, int32(2), pool.workerCount.Load())
+	assert.Equal(t, int32(1), pool.idleWorkerCount.Load())
 
 	// should fail due to full queue and rollback
 	ok := pool.tryStopIdleWorker()
 
+	assert.Equal(t, int32(2), pool.workerCount.Load())
+	assert.Equal(t, int32(1), pool.idleWorkerCount.Load())
+
 	cancel()
 
 	assert.Equal(t, false, ok)
-	assert.Equal(t, int32(1), atomic.LoadInt32(&pool.workerCount))
-	assert.Equal(t, int32(1), atomic.LoadInt32(&pool.idleWorkerCount))
 
 	pool.Stop()
 }
