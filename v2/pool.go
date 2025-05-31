@@ -18,21 +18,24 @@ func defaultPanicHandler(r any) {
 
 // Pool manages a set of worker goroutines to run submitted tasks.
 type Pool struct {
-	tasks         chan func()
+	// Configuration options
 	maxWorkers    int
 	queueCapacity int
-	wg            sync.WaitGroup
-	stopOnce      sync.Once
-	stopped       int32
-	ctx           context.Context
 	panicHandler  func(r any)
+	ctx           context.Context
+	ctxCancel     context.CancelFunc
+
+	// Internal state
+	taskQueue chan func()
+	wg        sync.WaitGroup
+	stopOnce  sync.Once
+	stopped   atomic.Bool
 }
 
 // NewPool creates a new Pool with the given number of workers and task queue capacity.
-// If no context is set, context.Background() is used.
 func NewPool(maxWorkers, queueCapacity int, options ...Option) *Pool {
 	p := &Pool{
-		tasks:         make(chan func(), queueCapacity),
+		taskQueue:     make(chan func(), queueCapacity),
 		maxWorkers:    maxWorkers,
 		queueCapacity: queueCapacity,
 		panicHandler:  defaultPanicHandler,
@@ -43,11 +46,32 @@ func NewPool(maxWorkers, queueCapacity int, options ...Option) *Pool {
 	}
 
 	if p.ctx == nil {
-		p.ctx = context.Background()
+		p.ctx, p.ctxCancel = context.WithCancel(context.Background())
 	}
 
 	p.startWorkers()
 	return p
+}
+
+type Option func(*Pool)
+
+// WithContext sets the parent context for the pool.
+func WithContext(parentCtx context.Context) Option {
+	return func(p *Pool) {
+		p.ctx, p.ctxCancel = context.WithCancel(parentCtx)
+	}
+}
+
+// WithPanicHandler sets a panic handler for the pool.
+func WithPanicHandler(panicHandler func(r any)) Option {
+	return func(p *Pool) {
+		p.panicHandler = panicHandler
+	}
+}
+
+// Stopped reports if the pool is closed and no longer accepts tasks.
+func (p *Pool) Stopped() bool {
+	return p.stopped.Load()
 }
 
 // Submit adds a task to the pool. Blocks if the queue is full.
@@ -62,7 +86,7 @@ func (p *Pool) Submit(task func()) {
 	}
 
 	p.wg.Add(1)
-	p.tasks <- func() {
+	p.taskQueue <- func() {
 		defer p.wg.Done()
 
 		select {
@@ -77,38 +101,27 @@ func (p *Pool) Submit(task func()) {
 
 // Stop closes the task queue. No new tasks can be submitted after this.
 func (p *Pool) Stop() {
-	atomic.StoreInt32(&p.stopped, 1)
-
 	p.stopOnce.Do(func() {
-		close(p.tasks)
+		p.stopped.Store(true)
+		close(p.taskQueue)
 	})
-}
-
-// Stopped reports if the pool is closed and no longer accepts tasks.
-func (p *Pool) Stopped() bool {
-	return atomic.LoadInt32(&p.stopped) == 1
-}
-
-// Wait blocks until all submitted tasks are finished.
-func (p *Pool) Wait() {
-	p.wg.Wait()
 }
 
 // StopAndWait stops the pool and waits for all tasks to finish.
 func (p *Pool) StopAndWait() {
 	p.Stop()
-	p.Wait()
+	p.wg.Wait()
 }
 
 // startWorkers launches the worker goroutines.
 func (p *Pool) startWorkers() {
 	for i := 0; i < p.maxWorkers; i++ {
-		go worker(p.tasks, p.panicHandler)
+		go worker(p.taskQueue, p.panicHandler)
 	}
 }
 
-func worker(tasks chan func(), panicHandler func(r any)) {
-	for task := range tasks {
+func worker(taskQueue chan func(), panicHandler func(r any)) {
+	for task := range taskQueue {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -120,40 +133,27 @@ func worker(tasks chan func(), panicHandler func(r any)) {
 	}
 }
 
-type Option func(*Pool)
-
-// WithContext sets a context for the pool.
-func WithContext(ctx context.Context) Option {
-	return func(p *Pool) {
-		p.ctx = ctx
-	}
+// TaskGroup allows tracking a batch of related tasks.
+type TaskGroup struct {
+	pool      *Pool
+	wg        sync.WaitGroup
+	ctx       context.Context
+	ctxCancel context.CancelFunc
 }
 
-// WithPanicHandler sets a panic handler for the pool.
-func WithPanicHandler(panicHandler func(r any)) Option {
-	return func(p *Pool) {
-		p.panicHandler = panicHandler
-	}
-}
-
-// NewGroup creates a new TaskGroup with context.Background().
+// NewGroup creates a new TaskGroup.
 func (p *Pool) NewGroup() *TaskGroup {
 	return p.NewGroupContext(context.Background())
 }
 
-// NewGroupContext creates a new TaskGroup with the given context.
-func (p *Pool) NewGroupContext(ctx context.Context) *TaskGroup {
+// NewGroupContext creates a new TaskGroup with the given context as its parent.
+func (p *Pool) NewGroupContext(parentCtx context.Context) *TaskGroup {
+	ctx, ctxCancel := context.WithCancel(parentCtx)
 	return &TaskGroup{
-		pool: p,
-		ctx:  ctx,
+		pool:      p,
+		ctx:       ctx,
+		ctxCancel: ctxCancel,
 	}
-}
-
-// TaskGroup allows tracking a batch of related tasks.
-type TaskGroup struct {
-	pool *Pool
-	wg   sync.WaitGroup
-	ctx  context.Context
 }
 
 // Submit adds a task to the group and schedules it in the pool.
@@ -169,7 +169,7 @@ func (g *TaskGroup) Submit(task func()) {
 
 	g.wg.Add(1)
 	g.pool.wg.Add(1)
-	g.pool.tasks <- func() {
+	g.pool.taskQueue <- func() {
 		defer g.pool.wg.Done()
 		defer g.wg.Done()
 
