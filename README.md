@@ -5,6 +5,11 @@ A toy project to learn and build worker pools in Go from scratch.
 ## Table of Contents
 
 - [Roadmap](#roadmap)
+  - [Basic Fixed-Size Pool](#basic-fixed-size-pool)
+  - [Cancellation and Panic Recovery](#cancellation-and-panic-recovery)
+  - [Dynamic Worker Scaling](#dynamic-worker-scaling)
+  - [Dedicated Queues (TODO)](#dedicated-queues-todo)
+  - [Task Results and Error Handling (TODO)](#task-results-and-error-handling-todo)
 - [Tests](#tests)
 - [Concepts and Goals](#concepts-and-goals)
   - [What Is a Worker Pool?](#what-is-a-worker-pool)
@@ -26,29 +31,35 @@ A toy project to learn and build worker pools in Go from scratch.
 
 This project is a simple way to learn how worker pools work in Go. It explores concurrency, task scheduling, and worker management step by step through multiple versions.
 
-**Version 1: basic fixed-size pool** ([Source code](v1)):
+### Basic Fixed-Size Pool
+
+Source: [v1/pool.go](v1/pool.go) (about 100 lines)
 
 - Fixed-size worker pool with buffered task queue.
 - Simple APIs to submit tasks and wait for all to complete.
 
-**Version 2: cancellation and panic recovery** ([Source code](v2)):
+### Cancellation and Panic Recovery
+
+Source: [v2/pool.go](v2/pool.go) (about 200 lines)
 
 - Adds `context.Context` support for canceling tasks.
 - Adds panic recovery inside workers.
 
-**Version 3: dynamic worker scaling** ([Source code](v3)):
+### Dynamic Worker Scaling
+
+Source: [v3/pool.go](v3/pool.go) (about 400 lines)
 
 - Starts new workers on demand during task submission.
 - Stops idle workers with an idle timeout option.
 - Adds APIs to query pool status.
 
-**Version 4: dedicated queues** (TODO):
+### Dedicated Queues (TODO)
 
-- Switches to dedicated queues (push model) for better scalability.
+Switches to dedicated queues (push model) for better scalability.
 
-**Version 5: task results and error handling** (TODO):
+### Task Results and Error Handling (TODO)
 
-- Adds support for returning task results and errors (Future-like interface).
+Adds support for returning task results and errors (Future-like interface).
 
 ## Tests
 
