@@ -2,7 +2,30 @@
 
 A toy project to learn and build worker pools in Go from scratch.
 
-## Progress
+## Table of Contents
+
+- [Overview](#overview)
+  - [Progress](#progress)
+  - [Tests](#tests)
+- [Concepts and Goals](#concepts-and-goals)
+  - [What Is a Worker Pool?](#what-is-a-worker-pool)
+  - [What Is It Good For?](#what-is-it-good-for)
+  - [What It Isn't Meant For](#what-it-isnt-meant-for)
+- [Design and Strategies](#design-and-strategies)
+  - [Task Dispatching Models](#task-dispatching-models)
+  - [Queue Strategies](#queue-strategies)
+  - [Worker Management Models](#worker-management-models)
+  - [Worker Scale-up Strategies](#worker-scale-up-strategies)
+  - [Worker Scale-down Strategies](#worker-scale-down-strategies)
+  - [Worker Resize Policies](#worker-resize-policies)
+  - [Rejection Strategies](#rejection-strategies)
+- [References](#references)
+
+## Overview
+
+This project is a simple way to learn how worker pools work in Go. It explores concurrency, task scheduling, and worker management step by step through multiple versions.
+
+### Progress
 
 - [x] v1: Basic fixed-size pool, task submission, and graceful shutdown.
 - [x] v2: Adds context support and panic recovery inside workers.
@@ -10,7 +33,61 @@ A toy project to learn and build worker pools in Go from scratch.
 - [ ] v4: Switch to dedicated queues (push model) for better scalability.
 - [ ] v5: Support task results and errors (Future-like interface).
 
-## Design: Key Concepts & Strategies
+### Tests
+
+Run all unit tests with race detection:
+
+```sh
+go test -race ./...
+```
+
+Run all benchmarks:
+
+```sh
+go test -v -bench . ./benchmark
+```
+
+## Concepts and Goals
+
+### What Is a Worker Pool?
+
+A [worker pool][1] is a software design pattern for achieving concurrency of execution in a computer program.
+
+It's designed to:
+
+- Bounded concurrency: Limit the number of active workers to avoid resource exhaustion.
+- Efficient resource usage: Reuse worker instances rather than spawning one per task.
+- Throughput and load balancing: Spread work evenly across multiple workers.
+
+### What Is It Good For?
+
+Worker pools are great for handling lots of **short-lived, independent tasks**. Use a worker pool when:
+
+- You have a large number of **short-lived, independent tasks** to process.
+- You want to **control the level of concurrency** to prevent overloading the CPU, database, or other resources.
+- Your tasks **do not require persistence, retries, or orchestration** across systems.
+
+Real-world examples:
+
+- **Network services**: Manage thousands of concurrent network connections or API calls without spawning unbounded threads.
+- **Batch processing**: Perform concurrent transformations or computations on a dataset (e.g., image resizing, file encoding).
+- **Database connection pools**: Limit the number of concurrent DB connections by wrapping connection acquisition in a worker-like model.
+
+### What It Isn't Meant For
+
+Worker pools are useful, but they **aren't designed for**:
+
+- **Persistent or long-running jobs** (e.g. ones that should survive restarts)
+- **Distributed task coordination** across machines or services
+- **Retries, persistence, or complex scheduling**
+
+If you need those things, look into:
+
+- Message queues (e.g. RabbitMQ, Kafka)
+- Workflow engines (e.g. Temporal, Celery)
+- Distributed systems or job runners
+
+## Design and Strategies
 
 ### Task Dispatching Models
 
@@ -101,14 +178,6 @@ When the queue is full:
 - Drop the task (with or without error).
 - Caller-runs: caller executes task synchronously (common in Java).
 
-## Tests
-
-Run all unit tests with race detection:
-
-```sh
-go test -race ./...
-```
-
 ## References
 
 Thanks to these repositories for inspiration and guidance:
@@ -116,3 +185,5 @@ Thanks to these repositories for inspiration and guidance:
 - [alitto/pond](https://github.com/alitto/pond)
 - [panjf2000/ants](https://github.com/panjf2000/ants)
 - [gammazero/workerpool](https://github.com/gammazero/workerpool)
+
+[1]: https://en.wikipedia.org/wiki/Thread_pool
