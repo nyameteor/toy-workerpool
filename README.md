@@ -20,6 +20,8 @@ A toy project to learn and build worker pools in Go from scratch.
   - [Worker Resize Policies](#worker-resize-policies)
   - [Rejection Strategies](#rejection-strategies)
 - [References](#references)
+  - [Repositories](#repositories)
+  - [Further Reading](#further-reading)
 
 ## Overview
 
@@ -180,10 +182,18 @@ When the queue is full:
 
 ## References
 
+### Repositories
+
 Thanks to these repositories for inspiration and guidance:
 
 - [alitto/pond](https://github.com/alitto/pond)
 - [panjf2000/ants](https://github.com/panjf2000/ants)
 - [gammazero/workerpool](https://github.com/gammazero/workerpool)
 
+### Further Reading
+
+- [Thread pool][1]
+- [Scheduling (computing)][2]
+
 [1]: https://en.wikipedia.org/wiki/Thread_pool
+[2]: https://en.wikipedia.org/wiki/Scheduling_(computing)
