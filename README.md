@@ -4,9 +4,8 @@ A toy project to learn and build worker pools in Go from scratch.
 
 ## Table of Contents
 
-- [Overview](#overview)
-  - [Progress](#progress)
-  - [Tests](#tests)
+- [Roadmap](#roadmap)
+- [Tests](#tests)
 - [Concepts and Goals](#concepts-and-goals)
   - [What Is a Worker Pool?](#what-is-a-worker-pool)
   - [What Is It Good For?](#what-is-it-good-for)
@@ -23,19 +22,35 @@ A toy project to learn and build worker pools in Go from scratch.
   - [Repositories](#repositories)
   - [Further Reading](#further-reading)
 
-## Overview
+## Roadmap
 
 This project is a simple way to learn how worker pools work in Go. It explores concurrency, task scheduling, and worker management step by step through multiple versions.
 
-### Progress
+**Version 1: basic fixed-size pool** ([Source code](v1)):
 
-- [x] v1: Basic fixed-size pool, task submission, and graceful shutdown.
-- [x] v2: Adds context support and panic recovery inside workers.
-- [x] v3: Support dynamic worker scaling with on-demand start and idle timeout.
-- [ ] v4: Switch to dedicated queues (push model) for better scalability.
-- [ ] v5: Support task results and errors (Future-like interface).
+- Fixed-size worker pool with buffered task queue.
+- Simple APIs to submit tasks and wait for all to complete.
 
-### Tests
+**Version 2: cancellation and panic recovery** ([Source code](v2)):
+
+- Adds `context.Context` support for canceling tasks.
+- Adds panic recovery inside workers.
+
+**Version 3: dynamic worker scaling** ([Source code](v3)):
+
+- Starts new workers on demand during task submission.
+- Stops idle workers with an idle timeout option.
+- Adds APIs to query pool status.
+
+**Version 4: dedicated queues** (TODO):
+
+- Switches to dedicated queues (push model) for better scalability.
+
+**Version 5: task results and error handling** (TODO):
+
+- Adds support for returning task results and errors (Future-like interface).
+
+## Tests
 
 Run all unit tests with race detection:
 
