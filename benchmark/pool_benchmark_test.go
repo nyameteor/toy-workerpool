@@ -2,6 +2,7 @@ package benchmark
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -9,13 +10,6 @@ import (
 	v1 "github.com/nyameteor/toy-workerpool/v1"
 	v2 "github.com/nyameteor/toy-workerpool/v2"
 	v3 "github.com/nyameteor/toy-workerpool/v3"
-)
-
-const (
-	MinWorkers    = 0
-	MaxWorkers    = 50_000
-	QueueCapacity = 100_000
-	IdleTimeout   = 100 * time.Millisecond
 )
 
 type workloadCase struct {
@@ -26,14 +20,30 @@ type workloadCase struct {
 }
 
 type taskFunc func()
+type taskKind int
+
+const (
+	taskUnknown taskKind = iota
+	taskCPUBound
+	taskIOBound
+)
+
 type taskCase struct {
 	name string
 	task taskFunc
+	kind taskKind
+}
+
+type poolConfig struct {
+	minWorkers    int
+	maxWorkers    int
+	queueCapacity int
+	idleTimeout   time.Duration
 }
 
 type poolSubmitFunc func(func())
 type poolStopFunc func()
-type poolSetupFunc func() (poolSubmitFunc, poolStopFunc)
+type poolSetupFunc func(poolConfig) (poolSubmitFunc, poolStopFunc)
 type poolCase struct {
 	name  string
 	setup poolSetupFunc
@@ -78,6 +88,7 @@ var taskCases = []taskCase{
 		task: func() {
 			time.Sleep(10 * time.Millisecond)
 		},
+		kind: taskIOBound,
 	},
 	{
 		name: "IsPrime_2to100",
@@ -93,6 +104,7 @@ var taskCases = []taskCase{
 				_ = isPrime
 			}
 		},
+		kind: taskCPUBound,
 	},
 	{
 		name: "Fibonacci_15",
@@ -106,13 +118,14 @@ var taskCases = []taskCase{
 			}
 			_ = fib(15)
 		},
+		kind: taskCPUBound,
 	},
 }
 
 var poolCases = []poolCase{
 	{
 		name: "RawGoroutines",
-		setup: func() (poolSubmitFunc, poolStopFunc) {
+		setup: func(_ poolConfig) (poolSubmitFunc, poolStopFunc) {
 			var wg sync.WaitGroup
 
 			submit := func(task func()) {
@@ -132,11 +145,11 @@ var poolCases = []poolCase{
 	},
 	{
 		name: "UnbufferedPool",
-		setup: func() (poolSubmitFunc, poolStopFunc) {
+		setup: func(cfg poolConfig) (poolSubmitFunc, poolStopFunc) {
 			var wg sync.WaitGroup
 			taskQueue := make(chan func())
 
-			for i := 0; i < MaxWorkers; i++ {
+			for i := 0; i < cfg.maxWorkers; i++ {
 				go func() {
 					for task := range taskQueue {
 						task()
@@ -162,11 +175,11 @@ var poolCases = []poolCase{
 	},
 	{
 		name: "BufferedPool",
-		setup: func() (poolSubmitFunc, poolStopFunc) {
+		setup: func(cfg poolConfig) (poolSubmitFunc, poolStopFunc) {
 			var wg sync.WaitGroup
-			taskQueue := make(chan func(), QueueCapacity)
+			taskQueue := make(chan func(), cfg.queueCapacity)
 
-			for i := 0; i < MaxWorkers; i++ {
+			for i := 0; i < cfg.maxWorkers; i++ {
 				go func() {
 					for task := range taskQueue {
 						task()
@@ -192,22 +205,22 @@ var poolCases = []poolCase{
 	},
 	{
 		name: "WorkerPool_V1",
-		setup: func() (poolSubmitFunc, poolStopFunc) {
-			pool := v1.NewPool(MaxWorkers, QueueCapacity)
+		setup: func(cfg poolConfig) (poolSubmitFunc, poolStopFunc) {
+			pool := v1.NewPool(cfg.maxWorkers, cfg.queueCapacity)
 			return pool.Submit, pool.StopAndWait
 		},
 	},
 	{
 		name: "WorkerPool_V2",
-		setup: func() (poolSubmitFunc, poolStopFunc) {
-			pool := v2.NewPool(MaxWorkers, QueueCapacity)
+		setup: func(cfg poolConfig) (poolSubmitFunc, poolStopFunc) {
+			pool := v2.NewPool(cfg.maxWorkers, cfg.queueCapacity)
 			return pool.Submit, pool.StopAndWait
 		},
 	},
 	{
 		name: "WorkerPool_V3",
-		setup: func() (poolSubmitFunc, poolStopFunc) {
-			pool := v3.NewPool(MaxWorkers, QueueCapacity, v3.WithMinWorkers(MinWorkers), v3.WithIdleTimeout(IdleTimeout))
+		setup: func(cfg poolConfig) (poolSubmitFunc, poolStopFunc) {
+			pool := v3.NewPool(cfg.maxWorkers, cfg.queueCapacity, v3.WithMinWorkers(cfg.minWorkers), v3.WithIdleTimeout(cfg.idleTimeout))
 			return pool.Submit, pool.StopAndWait
 		},
 	},
@@ -222,7 +235,7 @@ func BenchmarkAll(b *testing.B) {
 					b.ReportAllocs() // Enable memory allocation stats
 
 					for i := 0; i < b.N; i++ {
-						runWorkloadCase(&workloadCase, poolCase.setup, taskCase.task)
+						runWorkloadCase(workloadCase, poolCase.setup, taskCase.task, taskCase.kind)
 					}
 				})
 			}
@@ -230,23 +243,24 @@ func BenchmarkAll(b *testing.B) {
 	}
 }
 
-func runWorkloadCase(workloadCase *workloadCase, poolSetup poolSetupFunc, task taskFunc) {
-	poolSubmit, poolStop := poolSetup()
+func runWorkloadCase(w workloadCase, setup poolSetupFunc, task taskFunc, kind taskKind) {
+	config := derivePoolConfig(w, kind)
+	poolSubmit, poolStop := setup(config)
 
 	var wg sync.WaitGroup
 
-	wg.Add(workloadCase.userCount * workloadCase.taskCountPerUser)
+	wg.Add(w.userCount * w.taskCountPerUser)
 	wrappedTask := func() {
 		defer wg.Done()
 		task()
 	}
 
-	for i := 0; i < workloadCase.userCount; i++ {
+	for i := 0; i < w.userCount; i++ {
 		go func() {
-			for i := 0; i < workloadCase.taskCountPerUser; i++ {
+			for i := 0; i < w.taskCountPerUser; i++ {
 				poolSubmit(wrappedTask)
-				if workloadCase.taskInterval > 0 {
-					time.Sleep(workloadCase.taskInterval)
+				if w.taskInterval > 0 {
+					time.Sleep(w.taskInterval)
 				}
 			}
 		}()
@@ -255,4 +269,36 @@ func runWorkloadCase(workloadCase *workloadCase, poolSetup poolSetupFunc, task t
 	wg.Wait()
 
 	poolStop()
+}
+
+func derivePoolConfig(w workloadCase, kind taskKind) poolConfig {
+	const baseIdleTimeout = 100 * time.Millisecond
+	totalTasks := w.userCount * w.taskCountPerUser
+	numCPU := runtime.NumCPU()
+
+	switch kind {
+	case taskCPUBound:
+		return poolConfig{
+			minWorkers:    numCPU,
+			maxWorkers:    numCPU * 2,
+			queueCapacity: totalTasks / 10,
+			idleTimeout:   baseIdleTimeout,
+		}
+
+	case taskIOBound:
+		return poolConfig{
+			minWorkers:    numCPU * 10,
+			maxWorkers:    totalTasks / 10,
+			queueCapacity: totalTasks / 4,
+			idleTimeout:   baseIdleTimeout,
+		}
+
+	default: // unknown task kind
+		return poolConfig{
+			minWorkers:    numCPU,
+			maxWorkers:    numCPU * 4,
+			queueCapacity: totalTasks / 10,
+			idleTimeout:   baseIdleTimeout,
+		}
+	}
 }
