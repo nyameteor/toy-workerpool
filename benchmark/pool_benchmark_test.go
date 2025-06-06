@@ -226,7 +226,17 @@ var poolCases = []poolCase{
 	},
 }
 
-func BenchmarkAll(b *testing.B) {
+func BenchmarkIOBoundTasks(b *testing.B) {
+	taskIOBoundCases := filter(taskCases, func(t taskCase) bool { return t.kind == taskIOBound })
+	runBenchmark(b, workloadCases, taskIOBoundCases, poolCases)
+}
+
+func BenchmarkCPUBoundTasks(b *testing.B) {
+	taskCPUBoundCases := filter(taskCases, func(t taskCase) bool { return t.kind == taskCPUBound })
+	runBenchmark(b, workloadCases, taskCPUBoundCases, poolCases)
+}
+
+func runBenchmark(b *testing.B, workloadCases []workloadCase, taskCases []taskCase, poolCases []poolCase) {
 	for _, workloadCase := range workloadCases {
 		for _, taskCase := range taskCases {
 			for _, poolCase := range poolCases {
@@ -301,4 +311,14 @@ func derivePoolConfig(w workloadCase, kind taskKind) poolConfig {
 			idleTimeout:   baseIdleTimeout,
 		}
 	}
+}
+
+func filter[T any](slice []T, filterFunc func(T) bool) []T {
+	filteredSlice := []T{}
+	for _, v := range slice {
+		if filterFunc(v) {
+			filteredSlice = append(filteredSlice, v)
+		}
+	}
+	return filteredSlice
 }
