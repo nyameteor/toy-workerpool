@@ -87,6 +87,12 @@ It's designed to:
 - Efficient resource usage: Reuse worker instances rather than spawning one per task.
 - Throughput and load balancing: Spread work evenly across multiple workers.
 
+A worker pool is **not typically** a [general-purpose scheduler][2]:
+
+- It runs at the **application level**, above runtime schedulers (e.g., Go scheduler, Java virtual threads) at the **runtime level**, and OS schedulers at the **kernel level**.
+- It typically acts as a **concurrency limiter** and **task dispatcher**, rather than a full scheduler with preemption, fairness, time slicing, or system-wide load balancing.
+- It performs basic scheduling, usually with **simple strategies** like first-come, first-served (FCFS), rather than replicating the complex logic of lower-level schedulers.
+
 ### What Is It Good For?
 
 Worker pools are great for handling lots of **short-lived, independent tasks**. Use a worker pool when:
@@ -111,8 +117,8 @@ Worker pools are useful, but they **aren't designed for**:
 
 If you need those things, look into:
 
-- Message queues (e.g. RabbitMQ, Kafka)
-- Workflow engines (e.g. Temporal, Celery)
+- Message queues (e.g., RabbitMQ, Kafka)
+- Workflow engines (e.g., Temporal, Celery)
 - Distributed systems or job runners
 
 ## Design and Strategies
