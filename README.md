@@ -5,27 +5,10 @@ A toy project to learn and build worker pools in Go from scratch.
 ## Table of Contents
 
 - [Roadmap](#roadmap)
-  - [Basic Fixed-Size Pool](#basic-fixed-size-pool)
-  - [Cancellation and Panic Recovery](#cancellation-and-panic-recovery)
-  - [Dynamic Worker Scaling](#dynamic-worker-scaling)
-  - [Dedicated Queues (TODO)](#dedicated-queues-todo)
-  - [Task Results and Error Handling (TODO)](#task-results-and-error-handling-todo)
 - [Tests](#tests)
 - [Concepts and Goals](#concepts-and-goals)
-  - [What Is a Worker Pool?](#what-is-a-worker-pool)
-  - [What Is It Good For?](#what-is-it-good-for)
-  - [What It Isn't Meant For](#what-it-isnt-meant-for)
 - [Design and Strategies](#design-and-strategies)
-  - [Task Dispatching Models](#task-dispatching-models)
-  - [Queue Strategies](#queue-strategies)
-  - [Worker Management Models](#worker-management-models)
-  - [Worker Scale-up Strategies](#worker-scale-up-strategies)
-  - [Worker Scale-down Strategies](#worker-scale-down-strategies)
-  - [Worker Resize Policies](#worker-resize-policies)
-  - [Rejection Strategies](#rejection-strategies)
 - [References](#references)
-  - [Repositories](#repositories)
-  - [Further Reading](#further-reading)
 
 ## Roadmap
 
@@ -83,9 +66,9 @@ A [worker pool][1] is a software design pattern for achieving concurrency of exe
 
 It's designed to:
 
-- Bounded concurrency: Limit the number of active workers to avoid resource exhaustion.
-- Efficient resource usage: Reuse worker instances rather than spawning one per task.
-- Throughput and load balancing: Spread work evenly across multiple workers.
+- **Bounded concurrency**: Limit the number of active workers to avoid resource exhaustion.
+- **Efficient resource usage**: Reuse worker instances rather than spawning one per task.
+- **Throughput and load balancing**: Spread work evenly across multiple workers.
 
 A worker pool is **not typically** a [general-purpose scheduler][2]:
 
@@ -182,7 +165,7 @@ If you need those things, look into:
 
 ### Worker Scale-down Strategies
 
-- **Idle Timeout (TTL - Time to Live)**:
+- **Idle Timeout**:
 
   A worker terminates itself after being idle for a configured duration.
 
