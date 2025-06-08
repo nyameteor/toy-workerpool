@@ -68,18 +68,8 @@ var workloadCases = []workloadCase{
 		taskCountPerUser: 1000,
 		taskInterval:     0,
 	},
-	{
-		name:             "U10K_T100",
-		userCount:        10_000,
-		taskCountPerUser: 100,
-		taskInterval:     0,
-	},
-	{
-		name:             "U1M_T1",
-		userCount:        1000_000,
-		taskCountPerUser: 1,
-		taskInterval:     0,
-	},
+	// Cases with high userCount (e.g., 10K or 1M) may skew benchmark results
+	// due to goroutine overhead and are currently not recommended.
 }
 
 var taskCases = []taskCase{
