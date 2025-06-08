@@ -5,6 +5,8 @@ A toy project to learn and build worker pools in Go from scratch.
 ## Table of Contents
 
 - [Roadmap](#roadmap)
+- [Installation](#installation)
+- [Usage](#usage)
 - [Tests](#tests)
 - [Concepts and Goals](#concepts-and-goals)
 - [Design and Strategies](#design-and-strategies)
@@ -43,6 +45,46 @@ Switches to dedicated queues (push model) for better scalability.
 ### Task Results and Error Handling (TODO)
 
 Adds support for returning task results and errors (Future-like interface).
+
+## Installation
+
+```sh
+go get github.com/nyameteor/toy-workerpool
+```
+
+## Usage
+
+> **Note**: This is a toy project, not intended for production. See [recommended projects](#repositories) for real-world use.
+
+Each version has slight API differences, but the core usage is similar. See code comments for details.
+
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+
+	v1 "github.com/nyameteor/toy-workerpool/v1"
+)
+
+func main() {
+	// Create a worker pool with 5 workers and a queue capacity of 10
+	pool := v1.NewPool(5, 10)
+
+	// Submit 10 tasks to the pool
+	for i := 0; i < 10; i++ {
+		i := i
+		pool.Submit(func() {
+			time.Sleep(100 * time.Millisecond)
+			fmt.Printf("task #%d done\n", i)
+		})
+	}
+
+	// Wait for all tasks to finish and shut down the pool
+	pool.StopAndWait()
+}
+```
 
 ## Tests
 
