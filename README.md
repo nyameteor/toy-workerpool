@@ -8,6 +8,7 @@ A toy project to learn and build worker pools in Go from scratch.
 - [Installation](#installation)
 - [Usage](#usage)
 - [Tests](#tests)
+- [Benchmarks](#benchmarks)
 - [Concepts and Goals](#concepts-and-goals)
 - [Design and Strategies](#design-and-strategies)
 - [References](#references)
@@ -94,11 +95,15 @@ Run all unit tests with race detection:
 go test -race ./...
 ```
 
+## Benchmarks
+
 Run all benchmarks:
 
 ```sh
-go test -v -bench . ./benchmark
+go test -bench=. ./benchmark
 ```
+
+See the [benchmark summary](https://gist.github.com/nyameteor/cdda38fef777084c31c5f3beec4c02d8) for full results and observations.
 
 ## Concepts and Goals
 
